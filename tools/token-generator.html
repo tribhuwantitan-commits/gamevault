@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GameVault — generate access token</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        padding: 20px; background: #0a0c12; color: #e9ebf3;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .card { width: 100%; max-width: 460px; background: #11141d; border: 1px solid #242a3a; border-radius: 16px; padding: 20px; }
+      h1 { margin: 0 0 4px; font-size: 17px; }
+      p { margin: 0 0 14px; font-size: 13px; line-height: 1.55; color: #98a1b8; }
+      label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #98a1b8; margin-bottom: 6px; }
+      output, input {
+        display: block; width: 100%; padding: 11px 12px; border-radius: 10px;
+        border: 1px solid #242a3a; background: #0a0c12; color: #e9ebf3;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-all;
+      }
+      input { margin-bottom: 12px; }
+      button {
+        width: 100%; padding: 13px 14px; border-radius: 12px; border: 0; margin-top: 10px;
+        font-size: 15px; font-weight: 600; background: #7b7bf2; color: #0b0d14; cursor: pointer;
+      }
+      button.secondary { background: #171b26; color: #e9ebf3; border: 1px solid #242a3a; }
+      button:active { opacity: .85; }
+      .ok { color: #3ddc97; font-size: 12px; min-height: 16px; margin-top: 8px; }
+      .warn { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: rgba(245,181,68,.1); border: 1px solid rgba(245,181,68,.35); font-size: 12px; line-height: 1.55; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>GameVault access token</h1>
+      <p>
+        This makes a random 64-character secret for <code>GAMEVAULT_AUTH_TOKEN</code>. It is generated
+        on your phone — nothing is sent anywhere, and it works offline.
+      </p>
+
+      <label for="token">Your token</label>
+      <output id="token">tap “Generate”</output>
+      <div class="ok" id="status"></div>
+
+      <button id="gen">Generate new token</button>
+      <button id="copy" class="secondary">Copy to clipboard</button>
+
+      <label for="env" style="margin-top:18px">Paste into your host's environment variables</label>
+      <input id="env" readonly value="GAMEVAULT_AUTH_TOKEN=" onclick="this.select()" />
+
+      <div class="warn">
+        <strong>Keep it secret.</strong> Use the same value in two places: the server environment
+        variable <code>GAMEVAULT_AUTH_TOKEN</code>, and the “Access token” box that GameVault shows when
+        you open the site. Store it in your password manager — if you lose it you can just generate a
+        new one and update the host variable. Do not put it in Git or send it to anyone.
+      </div>
+    </main>
+
+    <script>
+      const tokenEl = document.getElementById('token');
+      const envEl = document.getElementById('env');
+      const statusEl = document.getElementById('status');
+
+      function randomHex(bytes) {
+        const buf = new Uint8Array(bytes);
+        crypto.getRandomValues(buf);
+        return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
+      }
+
+      function generate() {
+        const token = randomHex(32); // 32 bytes -> 64 hex chars, ~256 bits
+        tokenEl.textContent = token;
+        envEl.value = 'GAMEVAULT_AUTH_TOKEN=' + token;
+        statusEl.textContent = '';
+      }
+
+      document.getElementById('gen').addEventListener('click', generate);
+
+      document.getElementById('copy').addEventListener('click', async () => {
+        const token = tokenEl.textContent.trim();
+        if (!token || token.startsWith('tap')) {
+          statusEl.textContent = 'Generate a token first.';
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(token);
+          statusEl.textContent = 'Copied.';
+        } catch {
+          // Clipboard API needs HTTPS; fall back to selecting the field.
+          envEl.focus();
+          envEl.select();
+          statusEl.textContent = 'Copied not allowed — the value is selected, use your keyboard’s Copy.';
+        }
+      });
+
+      generate();
+    </script>
+  </body>
+</html>

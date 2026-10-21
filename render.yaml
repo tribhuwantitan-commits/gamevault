@@ -1,0 +1,53 @@
+# Render Blueprint for GameVault — single Node service (API + built frontend).
+#
+# One service serves everything on one HTTPS origin, which is exactly the setup
+# DEPLOYMENT.md recommends: no CORS, no split hosting, bucket stays private.
+#
+# Plan: free. Free web services have NO persistent disk, so the metadata index is
+# mirrored into the Filebase bucket via GAMEVAULT_INDEX_OBJECT (stored under
+# `_gamevault/`, outside the `assets/` prefix). That keeps titles, tags and
+# collections intact across restarts and redeploys.
+#
+# Secrets are declared with `sync: false`: they are NOT stored here — Render
+# prompts for them in the dashboard and keeps them server-side only.
+# Never put real keys in this file or in Git.
+
+services:
+  - type: web
+    name: gamevault
+    runtime: node
+    plan: free
+    region: singapore # closest Render region to India
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health # 503 in setup mode, 200 once Filebase is configured
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20.20.2
+      - key: HOST
+        value: 0.0.0.0
+      # PORT is injected by Render automatically — do not set it here.
+
+      # --- Filebase (non-secret settings) ---
+      - key: FILEBASE_BUCKET
+        value: gaming-asset
+      - key: FILEBASE_ENDPOINT
+        value: https://s3.filebase.io
+      - key: FILEBASE_REGION
+        value: us-east-1
+
+      # --- Keep the metadata index inside the bucket (free tier has no disk) ---
+      - key: GAMEVAULT_INDEX_OBJECT
+        value: _gamevault/index.json
+
+      # --- Secrets: fill these in the Render dashboard, never in this file ---
+      - key: FILEBASE_ACCESS_KEY_ID
+        sync: false
+      - key: FILEBASE_SECRET_ACCESS_KEY
+        sync: false
+      - key: GAMEVAULT_AUTH_TOKEN
+        sync: false

@@ -1,0 +1,30 @@
+{
+  "name": "gamevault",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GameVault \u2014 a private personal cloud library for game development assets, backed by Filebase S3-compatible storage.",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "build": "npm run build --workspace server && npm run build --workspace client",
+    "start": "npm run start --workspace server",
+    "test": "npm run test --workspace server",
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace client",
+    "check:secrets": "node scripts/check-no-secrets.mjs",
+    "s3:dev": "node server/dev/mock-s3.mjs",
+    "test:e2e": "node e2e/smoke.mjs",
+    "dev:local": "bash scripts/dev-local.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "playwright": "^1.64.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
