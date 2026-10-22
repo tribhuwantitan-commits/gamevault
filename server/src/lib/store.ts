@@ -2,11 +2,27 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
 import { getObjectText, putObjectText } from './s3.js';
-import { DEFAULT_COLLECTIONS } from './files.js';
+import { DEFAULT_COLLECTIONS, FALLBACK_COLLECTION } from './files.js';
+import { nextVersion, versionTitle, collectionIsVersioned } from './folders.js';
 import { nowIso, newId } from './util.js';
-import type { AssetRecord, CollectionRecord, PendingUpload, StoreShape } from '../types.js';
+import type {
+  AssetRecord,
+  CollectionRecord,
+  FolderRecord,
+  PendingUpload,
+  StoreShape,
+} from '../types.js';
 
-const EMPTY: StoreShape = { version: 1, assets: [], collections: [], pending: [] };
+const CURRENT_SCHEMA = 2;
+
+const EMPTY: StoreShape = {
+  version: 1,
+  schemaVersion: CURRENT_SCHEMA,
+  assets: [],
+  collections: [],
+  folders: [],
+  pending: [],
+};
 
 /**
  * Tiny JSON metadata store.
@@ -50,8 +66,10 @@ export class MetadataStore {
       const parsed = JSON.parse(raw) as Partial<StoreShape>;
       this.data = {
         version: 1,
+        schemaVersion: typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : 1,
         assets: Array.isArray(parsed.assets) ? parsed.assets : [],
         collections: Array.isArray(parsed.collections) ? parsed.collections : [],
+        folders: Array.isArray(parsed.folders) ? parsed.folders : [],
         pending: Array.isArray(parsed.pending) ? parsed.pending : [],
       };
     } catch (err) {
@@ -67,6 +85,7 @@ export class MetadataStore {
       this.data = structuredClone(EMPTY);
     }
     await this.loadRemoteIndex();
+    this.migrateCollections();
     this.ensureDefaultCollections();
     await this.persist();
     this.loaded = true;
@@ -87,8 +106,10 @@ export class MetadataStore {
       if (parsed.assets.length < this.data.assets.length) return;
       this.data = {
         version: 1,
+        schemaVersion: typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : 1,
         assets: parsed.assets,
         collections: Array.isArray(parsed.collections) ? parsed.collections : [],
+        folders: Array.isArray(parsed.folders) ? parsed.folders : [],
         pending: Array.isArray(parsed.pending) ? parsed.pending : [],
       };
       console.log(
@@ -123,6 +144,192 @@ export class MetadataStore {
       }
     });
     await this.remoteChain;
+  }
+
+  /**
+   * One-time move to the type-based collection list
+   * (Game, App, 2D, 3D, Audio, Environment, Other).
+   *
+   * Assets that sat in an old default (Buildings, Characters, Vehicles,
+   * Environments, UI, Textures, Animations) or in a deleted custom collection are
+   * filed under Other instead of being lost. Assets are never deleted here.
+   */
+  private migrateCollections(): void {
+    // Runs exactly once per data directory; afterwards custom collections work
+    // normally again and survive restarts.
+    if ((this.data.schemaVersion ?? 1) >= CURRENT_SCHEMA) return;
+
+    const wanted = new Set<string>(DEFAULT_COLLECTIONS.map((name) => name.toLowerCase()));
+
+    let moved = 0;
+    this.data.assets = this.data.assets.map((asset) => {
+      if (wanted.has(asset.collection.toLowerCase())) return asset;
+      moved += 1;
+      return { ...asset, collection: FALLBACK_COLLECTION, updatedAt: nowIso() };
+    });
+    this.data.collections = DEFAULT_COLLECTIONS.map((name) => ({
+      id: newId(),
+      name,
+      description: '',
+      default: true,
+      createdAt: nowIso(),
+    }));
+    this.data.schemaVersion = CURRENT_SCHEMA;
+    console.log(
+      `[gamevault] collections updated to the type list (${moved} asset(s) moved to ${FALLBACK_COLLECTION})`,
+    );
+  }
+
+  // ---------------------------------------------------------------- folders
+
+  async listFolders(): Promise<FolderRecord[]> {
+    const snap = await this.snapshot();
+    return snap.folders;
+  }
+
+  async getFolder(id: string): Promise<FolderRecord | null> {
+    const snap = await this.snapshot();
+    return snap.folders.find((folder) => folder.id === id) ?? null;
+  }
+
+  async createFolder(name: string, parentId: string | null): Promise<FolderRecord> {
+    return this.exclusive(async () => {
+      if (parentId && !this.data.folders.some((folder) => folder.id === parentId)) {
+        throw new Error('parent_not_found');
+      }
+      const duplicate = this.data.folders.some(
+        (folder) =>
+          (folder.parentId ?? null) === (parentId ?? null) &&
+          folder.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (duplicate) throw new Error('duplicate_folder');
+      const record: FolderRecord = {
+        id: newId(),
+        name,
+        parentId: parentId ?? null,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      this.data.folders.push(record);
+      await this.persist();
+      return record;
+    });
+  }
+
+  async renameFolder(id: string, name: string): Promise<FolderRecord | null> {
+    return this.exclusive(async () => {
+      const folder = this.data.folders.find((item) => item.id === id);
+      if (!folder) return null;
+      const duplicate = this.data.folders.some(
+        (item) =>
+          item.id !== id &&
+          (item.parentId ?? null) === (folder.parentId ?? null) &&
+          item.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (duplicate) throw new Error('duplicate_folder');
+      folder.name = name;
+      folder.updatedAt = nowIso();
+      await this.persist();
+      return folder;
+    });
+  }
+
+  /**
+   * Delete a folder.
+   *
+   * - `move` (default): the folder goes away, its assets are re-filed as un-filed
+   *   (they show up in "Assets" and Other), and its sub-folders move up one level.
+   *   Nothing is lost.
+   * - `delete`: the whole subtree and every asset inside it is removed; the
+   *   caller deletes the bucket objects afterwards.
+   */
+  async deleteFolder(
+    id: string,
+    mode: 'move' | 'delete',
+  ): Promise<{ folder: FolderRecord; removedAssets: AssetRecord[] } | null> {
+    return this.exclusive(async () => {
+      const folder = this.data.folders.find((item) => item.id === id);
+      if (!folder) return null;
+
+      // With `move` only this folder disappears; children are re-parented below.
+      const ids = new Set<string>([id]);
+      if (mode === 'delete') {
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const item of this.data.folders) {
+            if (item.parentId && ids.has(item.parentId) && !ids.has(item.id)) {
+              ids.add(item.id);
+              changed = true;
+            }
+          }
+        }
+      }
+
+      const touched = new Set<string>(ids);
+      const removedAssets =
+        mode === 'delete' ? this.data.assets.filter((asset) => touched.has(asset.folderId ?? '')) : [];
+
+      if (mode === 'delete') {
+        this.data.assets = this.data.assets.filter((asset) => !touched.has(asset.folderId ?? ''));
+      } else {
+        this.data.assets = this.data.assets.map((asset) =>
+          touched.has(asset.folderId ?? '')
+            ? {
+                ...asset,
+                folderId: null,
+                collection: FALLBACK_COLLECTION,
+                updatedAt: nowIso(),
+              }
+            : asset,
+        );
+      }
+
+      const parentId = folder.parentId ?? null;
+      this.data.folders = this.data.folders
+        .filter((item) => !ids.has(item.id))
+        .map((item) => {
+          if (!ids.has(item.parentId ?? '')) return item;
+          // Children of a deleted folder move up to the grandparent.
+          return mode === 'move' ? { ...item, parentId, updatedAt: nowIso() } : item;
+        });
+
+      await this.persist();
+      return { folder, removedAssets };
+    });
+  }
+
+  /**
+   * Commit an upload, optionally assigning the next automatic version title.
+   *
+   * Runs inside the write lock so two uploads finishing together cannot claim
+   * the same version number (v3 and v3).
+   */
+  async commitAsset(
+    asset: AssetRecord,
+    options: { autoVersion?: boolean } = {},
+  ): Promise<AssetRecord> {
+    return this.exclusive(async () => {
+      let record = asset;
+      const folderId = asset.folderId ?? null;
+
+      if (options.autoVersion && folderId && collectionIsVersioned(asset.collection)) {
+        const folder = this.data.folders.find((item) => item.id === folderId);
+        if (folder) {
+          const version = nextVersion(folder, this.data.assets);
+          folder.versionSeq = version;
+          folder.updatedAt = nowIso();
+          record = { ...asset, title: versionTitle(folder.name, version) };
+        }
+      }
+
+      this.data.assets = this.data.assets.filter((a) => a.id !== record.id);
+      this.data.assets.push(record);
+      this.data.pending = this.data.pending.filter((p) => p.id !== record.id);
+      this.data.collections = ensureCollection(this.data.collections, record.collection);
+      await this.persist();
+      return record;
+    });
   }
 
   private ensureDefaultCollections(): void {
@@ -191,20 +398,11 @@ export class MetadataStore {
     });
   }
 
-  async commitAsset(asset: AssetRecord): Promise<AssetRecord> {
-    return this.exclusive(async () => {
-      this.data.assets = this.data.assets.filter((a) => a.id !== asset.id);
-      this.data.assets.push(asset);
-      this.data.pending = this.data.pending.filter((p) => p.id !== asset.id);
-      this.data.collections = ensureCollection(this.data.collections, asset.collection);
-      await this.persist();
-      return asset;
-    });
-  }
-
   async updateAsset(
     id: string,
-    patch: Partial<Pick<AssetRecord, 'title' | 'tags' | 'collection' | 'description' | 'uploadedAt'>>,
+    patch: Partial<
+      Pick<AssetRecord, 'title' | 'tags' | 'collection' | 'description' | 'uploadedAt' | 'folderId'>
+    >,
   ): Promise<AssetRecord | null> {
     return this.exclusive(async () => {
       const idx = this.data.assets.findIndex((a) => a.id === id);

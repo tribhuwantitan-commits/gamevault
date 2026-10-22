@@ -8,7 +8,7 @@ import { UploadQueue } from './UploadQueue';
 import { Badge, Spinner } from './ui';
 
 export function UploadModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { capabilities, collections } = useLibrary();
+  const { capabilities, collections, folders } = useLibrary();
   const { addFiles, configure, configuration, activeCount } = useUploads();
   const { push } = useToast();
 
@@ -49,7 +49,9 @@ export function UploadModal({ open, onClose }: { open: boolean; onClose: () => v
       push({
         tone: 'info',
         title: `${added} file${added === 1 ? '' : 's'} queued`,
-        description: `Uploading to collection “${configuration.collection}”.`,
+        description: configuration.folderId
+          ? `Uploading to collection “${configuration.collection}” inside “${folders.find((f) => f.id === configuration.folderId)?.name ?? 'folder'}”.`
+          : `Uploading to collection “${configuration.collection}”.`,
       });
     }
   };
@@ -164,6 +166,30 @@ export function UploadModal({ open, onClose }: { open: boolean; onClose: () => v
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="gv-label" htmlFor="upload-folder">
+                Folder (game / app)
+              </label>
+              <select
+                id="upload-folder"
+                className="gv-input"
+                value={configuration.folderId ?? ''}
+                onChange={(event) => configure({ ...configuration, folderId: event.target.value || null })}
+              >
+                <option value="">Not in a folder</option>
+                {folders
+                  .slice()
+                  .sort((a, b) => a.path.localeCompare(b.path))
+                  .map((folder) => (
+                    <option key={folder.id} value={folder.id}>
+                      {folder.path.replace(/^\//, '')}
+                    </option>
+                  ))}
+              </select>
+              <p className="mt-1 text-[11px] text-muted">
+                Create folders in the Folders tab — e.g. City Builder → Commercial Building.
+              </p>
+            </div>
             <div>
               <label className="gv-label" htmlFor="upload-collection">
                 Collection
@@ -216,6 +242,26 @@ export function UploadModal({ open, onClose }: { open: boolean; onClose: () => v
               />
             </div>
           </div>
+
+          {configuration.folderId &&
+          (configuration.collection === 'Game' || configuration.collection === 'App') ? (
+            <label className="flex items-start gap-2 rounded-xl border border-line bg-surface2/50 p-3 text-xs">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={configuration.autoVersion}
+                onChange={(event) => configure({ ...configuration, autoVersion: event.target.checked })}
+              />
+              <span>
+                <span className="font-medium text-ink">Auto version ZIP builds</span>
+                <span className="mt-0.5 block text-muted">
+                  A ZIP dropped into “{folders.find((f) => f.id === configuration.folderId)?.name ?? 'this folder'}”
+                  is named that folder plus v1, v2, v3… instead of its own filename. Applies to Game and App
+                  collections only.
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           {configuration.tags.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">

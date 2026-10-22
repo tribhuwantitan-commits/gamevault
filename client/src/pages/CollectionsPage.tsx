@@ -62,8 +62,12 @@ export function CollectionsPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Collections</h1>
         <p className="mt-1 text-sm text-muted">
-          Organise assets into buckets of your own — buildings, characters, vehicles, environments, UI,
-          textures, audio, animations, and anything else you need.
+          Collections are <strong className="text-ink">content types</strong> — Game, App, 2D, 3D, Audio,
+          Environment, Other. Grouping by project (City Builder, Kingdom Castle) lives in{' '}
+          <Link to="/folders" className="text-accent hover:underline">
+            Folders
+          </Link>
+          , so one game folder can hold its 2D art, 3D models, audio and ZIP builds together.
         </p>
       </header>
 
@@ -77,7 +81,7 @@ export function CollectionsPage() {
             className="gv-input"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="e.g. Weapons, Shaders, VFX"
+            placeholder="e.g. Video, Fonts, Shaders"
             maxLength={48}
           />
         </div>

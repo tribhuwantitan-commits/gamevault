@@ -23,11 +23,27 @@ export interface AssetRecord {
   kind: AssetKind;
   extension: string;
   collection: string;
+  /** Folder this asset lives in. `null`/absent = not filed yet. */
+  folderId?: string | null;
   tags: string[];
   description: string;
   uploadedAt: string;
   updatedAt: string;
   etag?: string;
+}
+
+/**
+ * A user-created folder. Folders nest to any depth via `parentId`, so
+ * City Builder → Commercial Building → Windows is just parent links.
+ */
+export interface FolderRecord {
+  id: string;
+  name: string;
+  parentId: string | null;
+  /** Highest version handed out in this folder; never decreases. */
+  versionSeq?: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CollectionRecord {
@@ -46,6 +62,8 @@ export interface PendingUpload {
   size: number;
   contentType: string;
   collection: string;
+  folderId?: string | null;
+  autoVersion?: boolean;
   tags: string[];
   description: string;
   mode: 'single' | 'multipart';
@@ -57,8 +75,11 @@ export interface PendingUpload {
 
 export interface StoreShape {
   version: 1;
+  /** Bumped when the on-disk shape needs a one-time migration (2 = folder/type collections). */
+  schemaVersion?: number;
   assets: AssetRecord[];
   collections: CollectionRecord[];
+  folders: FolderRecord[];
   pending: PendingUpload[];
 }
 

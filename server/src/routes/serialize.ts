@@ -13,6 +13,8 @@ export interface AssetDTO {
   kind: string;
   extension: string;
   collection: string;
+  /** Folder the asset is filed in (null = not filed). */
+  folderId: string | null;
   tags: string[];
   description: string;
   uploadedAt: string;
@@ -36,6 +38,7 @@ export function toAssetDTO(asset: AssetRecord): AssetDTO {
     kind: asset.kind,
     extension: asset.extension,
     collection: asset.collection,
+    folderId: asset.folderId ?? null,
     tags: asset.tags,
     description: asset.description,
     uploadedAt: asset.uploadedAt,

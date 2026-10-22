@@ -8,6 +8,7 @@ import { rateLimit } from './middleware/rateLimit.js';
 import { assetsRouter } from './routes/assets.js';
 import { authRouter } from './routes/auth.js';
 import { collectionsRouter } from './routes/collections.js';
+import { foldersRouter } from './routes/folders.js';
 import { metaRouter } from './routes/meta.js';
 
 export function createApp(): Express {
@@ -68,6 +69,7 @@ export function createApp(): Express {
   api.use('/', metaRouter);
   api.use('/assets', assetsRouter);
   api.use('/collections', collectionsRouter);
+  api.use('/folders', foldersRouter);
   app.use('/api', api);
 
   // --- Production: serve the built SPA (same origin, no CORS needed) ---
