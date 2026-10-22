@@ -18,7 +18,8 @@
     "check:secrets": "node scripts/check-no-secrets.mjs",
     "s3:dev": "node server/dev/mock-s3.mjs",
     "test:e2e": "node e2e/smoke.mjs",
-    "dev:local": "bash scripts/dev-local.sh"
+    "dev:local": "bash scripts/dev-local.sh",
+    "hash-password": "node server/scripts/hash-password.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

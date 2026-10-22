@@ -88,8 +88,30 @@ export const config = {
     downloadExpiresSeconds: int('PRESIGN_DOWNLOAD_EXPIRES_SECONDS', 10 * 60),
   },
 
-  /** Optional shared secret. When set, every mutating API route requires it. */
+  /**
+   * Optional shared secret for API clients (curl, scripts).
+   * Unchanged behaviour: when set, requests must present it OR a valid session.
+   */
   authToken: str('GAMEVAULT_AUTH_TOKEN'),
+
+  /**
+   * Optional PBKDF2 hash of the browser login password. When set, the UI unlocks
+   * with a password instead of asking the user to paste the API token.
+   * Format: pbkdf2$sha256$<iterations>$<salt>$<hash>  (see tools/password-hash.html)
+   */
+  passwordHash: str('GAMEVAULT_PASSWORD_HASH'),
+
+  session: {
+    /** Inactivity window: the session expires this long after the last request. */
+    ttlSeconds: int('GAMEVAULT_SESSION_TTL_HOURS', 24) * 3600,
+    /** Re-issue the cookie when fewer than this many seconds remain. */
+    refreshThresholdSeconds: 300,
+    /**
+     * `Secure` cookie flag. Defaults to on in production (Render terminates HTTPS).
+     * Override with GAMEVAULT_COOKIE_SECURE=false only for plain-HTTP local dev.
+     */
+    cookieSecure: bool('GAMEVAULT_COOKIE_SECURE', str('NODE_ENV', 'development') === 'production'),
+  },
 
   allowedOrigins,
 

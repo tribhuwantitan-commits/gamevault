@@ -72,6 +72,8 @@ export interface Capabilities {
   version: string;
   storageConfigured: boolean;
   authRequired: boolean;
+  passwordLoginEnabled: boolean;
+  sessionTtlSeconds: number;
   setupInstructions: string[] | null;
   limits: {
     maxUploadBytes: number;

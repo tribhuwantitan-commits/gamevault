@@ -9,8 +9,18 @@ import { Badge, Spinner } from '../components/ui';
 import type { RescanResult } from '../lib/types';
 
 export function SettingsPage() {
-  const { capabilities, health, checkingHealth, checkHealth, refresh, refreshStats, refreshCollections } =
-    useLibrary();
+  const {
+    capabilities,
+    health,
+    checkingHealth,
+    checkHealth,
+    refresh,
+    refreshStats,
+    refreshCollections,
+    passwordLoginEnabled,
+    sessionExpiresAt,
+    lockNow,
+  } = useLibrary();
   const { theme, setTheme } = useTheme();
   const { push } = useToast();
 
@@ -259,6 +269,31 @@ PORT=3001`}
         <p className="mt-3 text-[11px] leading-relaxed text-muted">
           Accepted extensions: {(capabilities?.supportedExtensions ?? []).join(', ')}
         </p>
+      </section>
+
+      <section className="gv-panel p-4 sm:p-5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <Icon name="lock" size={16} /> Session
+        </h2>
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted">
+          <Badge tone={passwordLoginEnabled ? 'success' : 'neutral'}>
+            {passwordLoginEnabled ? 'Password login' : 'API token only'}
+          </Badge>
+          {sessionExpiresAt ? (
+            <span>Session valid until {new Date(sessionExpiresAt).toLocaleString()}</span>
+          ) : (
+            <span>No password session in this browser</span>
+          )}
+          {passwordLoginEnabled ? (
+            <span>
+              Locks automatically after{' '}
+              {Math.round((capabilities?.sessionTtlSeconds ?? 86_400) / 3600)} hours of inactivity.
+            </span>
+          ) : null}
+          <button type="button" className="gv-btn-secondary ml-auto" onClick={lockNow}>
+            <Icon name="lock" size={14} /> Lock now
+          </button>
+        </div>
       </section>
 
       <section className="gv-panel border-danger/30 p-4 sm:p-5">

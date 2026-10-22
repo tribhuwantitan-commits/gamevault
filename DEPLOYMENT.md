@@ -14,6 +14,8 @@ these are the steps you run yourself. **Never make the Filebase bucket public.**
 | `FILEBASE_BUCKET` | ✅ | `gaming-asset` |
 | `FILEBASE_ENDPOINT` | ✅ | `https://s3.filebase.io` |
 | `GAMEVAULT_AUTH_TOKEN` | ✅ before going public | `openssl rand -hex 32` |
+| `GAMEVAULT_PASSWORD_HASH` | optional (recommended) | `pbkdf2$sha256$600000$…` — see §7.8 |
+| `GAMEVAULT_SESSION_TTL_HOURS` | optional | `24` |
 | `NODE_ENV` | ✅ | `production` |
 | `PORT` | usually injected by the host | `3001` |
 | `HOST` | recommended | `0.0.0.0` |
@@ -215,13 +217,14 @@ disk — use the bucket index mirror in 7.7 instead, which is already enabled in
 
 ### 7.3 Secrets you will type into the host dashboard (never into chat or Git)
 
-Three values only. Generate the third on your phone with `tools/token-generator.html`.
+Four values at most. Generate two of them on your phone with the HTML tools in `tools/`.
 
 | Variable | Where it comes from |
 | --- | --- |
 | `FILEBASE_ACCESS_KEY_ID` | Filebase console → Access Keys |
 | `FILEBASE_SECRET_ACCESS_KEY` | Filebase console (shown once) |
 | `GAMEVAULT_AUTH_TOKEN` | `tools/token-generator.html` (tap Generate → Copy) |
+| `GAMEVAULT_PASSWORD_HASH` | `tools/password-hash.html` (§7.8) — optional but recommended |
 
 `render.yaml` already pins the non-secret values (`FILEBASE_BUCKET=gaming-asset`,
 `FILEBASE_ENDPOINT=https://s3.filebase.io`, `FILEBASE_REGION=us-east-1`, `NODE_ENV=production`,
@@ -286,3 +289,55 @@ You can verify it from the Filebase console: open the bucket and confirm a `_gam
 object appears after your first upload or metadata edit.
 
 Cold starts on the free plan are normal: the first page load after a sleep can take 30–60 seconds.
+
+### 7.8 Password login (a short password instead of the long token)
+
+`GAMEVAULT_AUTH_TOKEN` is a 64-character machine secret — fine for scripts, painful to
+type on a phone. `GAMEVAULT_PASSWORD_HASH` adds a **separate, human-friendly login
+password** for the browser UI. It does not replace the token: both work, and both are
+checked with the same `requireAuth` middleware.
+
+How it works:
+
+- The browser posts the password once to `POST /api/auth/login`.
+- The server compares it against the stored **PBKDF2-SHA256** hash (600 000 iterations,
+  random 16-byte salt) in constant time.
+- On success the server sets an `HttpOnly`, `SameSite=Strict` cookie (`gv_session`)
+  holding an HMAC-signed expiry timestamp. **The password, the hash and the API token are
+  never sent to the browser.**
+- Sessions refresh while you use the app and expire after **24 hours of inactivity**
+  (`GAMEVAULT_SESSION_TTL_HOURS`). The UI also locks itself client-side after the same
+  idle period, so an abandoned tab cannot be used.
+- `Settings → Session → Lock now` ends the session immediately.
+
+**Step 1 — generate the hash (phone).** Open `tools/password-hash.html` in your phone
+browser (it works offline, nothing is uploaded), type the password twice, tap
+**Create hash**, then **Copy**. You get one line:
+
+```
+pbkdf2$sha256$600000$<salt>$<hash>
+```
+
+No browser to hand? Any Node install works:
+
+```bash
+node server/scripts/hash-password.mjs 'my login password'
+```
+
+**Step 2 — paste it into the host.** Render → your service → **Environment** →
+`GAMEVAULT_PASSWORD_HASH` → paste the `pbkdf2$…` line → **Save changes**. `render.yaml`
+already declares the variable with `sync: false`, so the value never lives in Git.
+Optionally set `GAMEVAULT_SESSION_TTL_HOURS` (default `24`).
+
+**Step 3 — use it.** Open the site; it asks for the password instead of the token.
+The token still works for API calls (`X-GameVault-Token` header) and via
+"Use an API token instead" on the login screen.
+
+Notes:
+
+- Leave the variable empty to keep token-only login — nothing else changes.
+- Changing the password means generating a new hash and updating the variable; changing
+  `GAMEVAULT_AUTH_TOKEN` also invalidates every existing session.
+- Sessions are stateless, so a cookie copied out of a browser stays valid until it
+  expires. Keeping the TTL at 24 hours limits that exposure; "Lock now" clears it locally.
+- Never paste the password itself (or the hash) into chat, a commit, or a `VITE_` variable.

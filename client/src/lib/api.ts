@@ -86,6 +86,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+export interface SessionInfo {
+  authenticated: boolean;
+  passwordLoginEnabled: boolean;
+  expiresAt: string | null;
+  ttlSeconds: number;
+}
+
 export interface ListParams {
   q?: string;
   collection?: string;
@@ -98,6 +105,17 @@ export interface ListParams {
 
 export const api = {
   capabilities: () => request<Capabilities>('/api/capabilities'),
+
+  // --- password login (session cookie, HttpOnly; the password never leaves the server) ---
+  session: () => request<SessionInfo>('/api/auth/session'),
+
+  login: (password: string) =>
+    request<SessionInfo>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
 
   health: (deep = false) =>
     request<HealthResponse>(`/api/health${deep ? '?storage=1' : ''}`).catch((err) => {

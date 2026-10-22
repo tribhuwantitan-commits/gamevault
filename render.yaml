@@ -54,3 +54,12 @@ services:
         sync: false
       - key: GAMEVAULT_AUTH_TOKEN
         sync: false
+      # Optional: a separate, user-friendly LOGIN password (not the API token).
+      # Generate the hash on your phone with tools/password-hash.html and paste
+      # the `pbkdf2$...` string into the Render dashboard. Leave empty to keep
+      # token-only login.
+      - key: GAMEVAULT_PASSWORD_HASH
+        sync: false
+      # Optional session settings (defaults shown).
+      - key: GAMEVAULT_SESSION_TTL_HOURS
+        value: 24

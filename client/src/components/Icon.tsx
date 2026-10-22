@@ -36,6 +36,8 @@ export type IconName =
   | 'play'
   | 'pause'
   | 'lock'
+  | 'eye'
+  | 'eyeOff'
   | 'cloud'
   | 'sort'
   | 'filter'
@@ -200,6 +202,20 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   play: <path d="M7 4l13 8-13 8V4z" />,
   pause: <path d="M8 4v16M16 4v16" />,
+  eye: (
+    <>
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  eyeOff: (
+    <>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 5.2A10.6 10.6 0 0112 5c6.4 0 10 7 10 7a17 17 0 01-3.2 4.1" />
+      <path d="M6.2 6.8A17 17 0 002 12s3.6 7 10 7a10.9 10.9 0 004.3-.9" />
+      <path d="M9.9 9.9a3 3 0 004.2 4.2" />
+    </>
+  ),
   lock: (
     <>
       <rect x="4" y="10" width="16" height="11" rx="2" />

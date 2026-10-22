@@ -80,6 +80,14 @@ interface LibraryContextValue {
   needsToken: boolean;
   setAccessToken: (token: string) => void;
   hasToken: boolean;
+
+  /** Password login (GAMEVAULT_PASSWORD_HASH configured on the server). */
+  passwordLoginEnabled: boolean;
+  requiresLogin: boolean;
+  login: (password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  lockNow: () => void;
+  sessionExpiresAt: string | null;
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
@@ -111,6 +119,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [needsToken, setNeedsToken] = useState(false);
   const [hasToken, setHasToken] = useState(Boolean(getToken()));
+  const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(false);
+  const [requiresLogin, setRequiresLogin] = useState(false);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const firstLoad = useRef(true);
@@ -118,14 +129,21 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const handleApiError = useCallback((err: unknown) => {
     if (err instanceof ApiError) {
       if (err.status === 401) {
-        setNeedsToken(true);
-        return 'This library is protected. Enter your GameVault access token.';
+        // Password login available -> send the user to the login screen.
+        setRequiresLogin((current) => {
+          if (current) return current;
+          setNeedsToken(!passwordLoginEnabled);
+          return passwordLoginEnabled;
+        });
+        return passwordLoginEnabled
+          ? 'Your session ended. Please log in again.'
+          : 'This library is protected. Enter your GameVault access token.';
       }
       if (err.code === 'storage_not_configured') return err.message;
       return err.message;
     }
     return err instanceof Error ? err.message : 'Something went wrong.';
-  }, []);
+  }, [passwordLoginEnabled]);
 
   const refreshCapabilities = useCallback(async () => {
     try {
@@ -207,10 +225,27 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /** Read the (public) session state so the right gate is shown on first paint. */
+  const refreshSession = useCallback(async () => {
+    try {
+      const info = await api.session();
+      setPasswordLoginEnabled(info.passwordLoginEnabled);
+      setSessionExpiresAt(info.expiresAt);
+      if (info.passwordLoginEnabled) {
+        setRequiresLogin(!info.authenticated);
+        setNeedsToken(false);
+      }
+      return info;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     void refreshCapabilities();
+    void refreshSession();
     void checkHealth();
-  }, [refreshCapabilities, checkHealth]);
+  }, [refreshCapabilities, refreshSession, checkHealth]);
 
   useEffect(() => {
     if (needsToken) {
@@ -301,6 +336,37 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setCollections((current) => current.filter((c) => c.id !== id));
   }, []);
 
+  const login = useCallback(
+    async (password: string) => {
+      const info = await api.login(password);
+      setSessionExpiresAt(info.expiresAt);
+      setRequiresLogin(false);
+      setNeedsToken(false);
+      await Promise.all([refresh(), refreshCollections(), checkHealth()]);
+    },
+    [refresh, refreshCollections, checkHealth],
+  );
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch {
+      // Even if the call fails, drop the local view of the session.
+    }
+    setToken('');
+    setHasToken(false);
+    setSessionExpiresAt(null);
+    setAssets([]);
+    setTotal(0);
+    setStats(null);
+    setRequiresLogin(passwordLoginEnabled);
+    setNeedsToken(passwordLoginEnabled ? false : Boolean(capabilities?.authRequired));
+  }, [passwordLoginEnabled, capabilities?.authRequired]);
+
+  const lockNow = useCallback(() => {
+    void logout();
+  }, [logout]);
+
   const setAccessToken = useCallback(
     (token: string) => {
       setToken(token);
@@ -315,6 +381,55 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     },
     [refreshCapabilities, refresh, refreshCollections, checkHealth],
   );
+
+  /**
+   * 24-hour inactivity auto-lock.
+   *
+   * The server also expires the session, so this is the belt to that braces: it
+   * locks an idle open tab without waiting for the next API call. Any mouse,
+   * key, touch or scroll activity resets the timer.
+   */
+  useEffect(() => {
+    if (!passwordLoginEnabled || requiresLogin) return;
+
+    const ACTIVITY_KEY = 'gamevault.lastActivity';
+    const ttlMs = (capabilities?.sessionTtlSeconds ?? 86_400) * 1000;
+    const markActivity = () => {
+      try {
+        localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
+      } catch {
+        /* storage unavailable — the server-side expiry still applies */
+      }
+    };
+
+    let lastWrite = 0;
+    const onActivity = () => {
+      const now = Date.now();
+      if (now - lastWrite > 15_000) {
+        lastWrite = now;
+        markActivity();
+      }
+    };
+
+    markActivity();
+    const events: Array<keyof WindowEventMap> = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    for (const event of events) window.addEventListener(event, onActivity, { passive: true });
+
+    const timer = setInterval(() => {
+      let last = Date.now();
+      try {
+        last = Number(localStorage.getItem(ACTIVITY_KEY) ?? Date.now());
+      } catch {
+        last = Date.now();
+      }
+      if (Date.now() - last >= ttlMs) lockNow();
+    }, 60_000);
+
+    return () => {
+      for (const event of events) window.removeEventListener(event, onActivity);
+      clearInterval(timer);
+    };
+  }, [passwordLoginEnabled, requiresLogin, capabilities?.sessionTtlSeconds, lockNow]);
 
   const hasActiveFilters =
     Boolean(filters.q) ||
@@ -357,6 +472,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       needsToken,
       setAccessToken,
       hasToken,
+      passwordLoginEnabled,
+      requiresLogin,
+      login,
+      logout,
+      lockNow,
+      sessionExpiresAt,
     }),
     [
       capabilities,
@@ -391,6 +512,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       needsToken,
       setAccessToken,
       hasToken,
+      passwordLoginEnabled,
+      requiresLogin,
+      login,
+      logout,
+      lockNow,
+      sessionExpiresAt,
     ],
   );
 
