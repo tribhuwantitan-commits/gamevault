@@ -184,6 +184,23 @@ The API already serves the built SPA from `client/dist` (`server/src/app.ts`), s
 you one HTTPS origin, no CORS, and no separate frontend host. That is the lowest-risk option and it
 matches section 2 above.
 
+### 7.1b Build step: devDependencies must be installed
+
+The build compiles TypeScript, so it needs `typescript`, `@types/node` and `@types/express`, which
+live in `devDependencies`. Render sets `NODE_ENV=production`, and npm then treats an install as
+`--omit=dev` — the build fails with `sh: 1: tsc: not found` or
+`error TS2688: Cannot find type definition file for 'node'`.
+
+Two guards are in the repo, use either or both:
+
+* `.npmrc` contains `include=dev`, so a plain `npm ci` installs dev dependencies even under
+  `NODE_ENV=production`. This also fixes services whose build command was set by hand in the
+  dashboard.
+* `render.yaml` pins `buildCommand: npm ci --include=dev && npm run build` for blueprint deploys.
+
+Runtime is unaffected: `NODE_ENV=production` still applies, and the server only requires
+`dependencies` at run time.
+
 ### 7.2 Cost review (verify current prices on the provider page before paying)
 
 | Option | Approx. monthly | Important catch |

@@ -19,7 +19,10 @@ services:
     plan: free
     region: singapore # closest Render region to India
     branch: main
-    buildCommand: npm ci && npm run build
+    # `--include=dev` is required: NODE_ENV=production makes npm treat `npm ci`
+    # as `--omit=dev`, which skips typescript and @types/node. The build needs
+    # both; the running server only needs `dependencies`.
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health # 503 in setup mode, 200 once Filebase is configured
     autoDeploy: true
