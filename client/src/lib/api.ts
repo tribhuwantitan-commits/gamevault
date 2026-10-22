@@ -3,6 +3,8 @@ import type {
   AssetListResponse,
   Capabilities,
   Collection,
+  Folder,
+  FolderListResponse,
   HealthResponse,
   MultipartUploadTicket,
   RescanResult,
@@ -94,6 +96,9 @@ export interface SessionInfo {
 }
 
 export interface ListParams {
+  /** Folder id, or "root" for assets that are not filed. */
+  folder?: string;
+  includeDescendants?: boolean;
   q?: string;
   collection?: string;
   kind?: string;
@@ -117,6 +122,26 @@ export const api = {
 
   logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
 
+  // --- folders ---
+  listFolders: () => request<FolderListResponse>('/api/folders'),
+
+  createFolder: (name: string, parentId: string | null) =>
+    request<{ folder: Folder }>('/api/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name, parentId }),
+    }),
+
+  renameFolder: (id: string, name: string) =>
+    request<{ folder: Folder }>(`/api/folders/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteFolder: (id: string, mode: 'move' | 'delete' = 'move') =>
+    request<{ deleted: boolean; removedAssets: number }>(`/api/folders/${id}?mode=${mode}`, {
+      method: 'DELETE',
+    }),
+
   health: (deep = false) =>
     request<HealthResponse>(`/api/health${deep ? '?storage=1' : ''}`).catch((err) => {
       // /api/health returns 503 in setup mode — that is still useful JSON.
@@ -138,6 +163,8 @@ export const api = {
     const search = new URLSearchParams();
     if (params.q) search.set('q', params.q);
     if (params.collection && params.collection !== 'All') search.set('collection', params.collection);
+    if (params.folder) search.set('folder', params.folder);
+    if (params.includeDescendants) search.set('includeDescendants', '1');
     if (params.kind && params.kind !== 'all') search.set('kind', params.kind);
     if (params.tag) search.set('tag', params.tag);
     if (params.sort) search.set('sort', params.sort);
@@ -151,7 +178,7 @@ export const api = {
 
   patchAsset: (
     id: string,
-    patch: Partial<Pick<Asset, 'title' | 'tags' | 'collection' | 'description'>>,
+    patch: Partial<Pick<Asset, 'title' | 'tags' | 'collection' | 'description' | 'folderId'>>,
   ) => request<{ asset: Asset }>(`/api/assets/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   deleteAsset: (id: string) => request<{ deleted: boolean; id: string }>(`/api/assets/${id}`, { method: 'DELETE' }),
@@ -181,6 +208,8 @@ export const api = {
         filename: file.name,
         size: file.size,
         collection: options.collection,
+        folderId: options.folderId,
+        autoVersion: options.autoVersion,
         tags: options.tags,
         description: options.description,
       }),

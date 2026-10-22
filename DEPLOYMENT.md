@@ -341,3 +341,22 @@ Notes:
 - Sessions are stateless, so a cookie copied out of a browser stays valid until it
   expires. Keeping the TTL at 24 hours limits that exposure; "Lock now" clears it locally.
 - Never paste the password itself (or the hash) into chat, a commit, or a `VITE_` variable.
+
+### 7.9 Folders and automatic versioning (no extra setup)
+
+Nothing to configure — folders live in the same metadata index as the rest of the app,
+so they survive restarts on the free plan through `GAMEVAULT_INDEX_OBJECT`.
+
+- **Folders** tab → *New folder*, then open a folder and create more inside it
+  (City Builder → Commercial Building → Windows). Any depth, any names.
+- Deleting a folder asks first: *Move assets to Other* (nothing is lost) or
+  *Delete folder and its files* (bucket objects are removed too).
+- Uploads pick up the folder you are currently inside; the Upload dialog also has a
+  folder dropdown and an **Auto version ZIP builds** checkbox.
+- **Versioning rules:** a bundle file (`.zip`, `.rar`, `.7z`, `.tar`, `.unitypackage`, `.apk`,
+  `.exe`…) uploaded into a folder while the collection is **Game** or **App** is named
+  `<folder> v1`, `v2`, `v3`… Numbers come from the folder's own counter, so a deleted
+  version is never reused. Every other file keeps its own name.
+- **Collections** are now content types only: Game, App, 2D, 3D, Audio, Environment, Other.
+  Old collections (Buildings, Characters, Vehicles, UI, Textures, Animations) move to
+  **Other** once, on the first start after upgrading — no asset is deleted.

@@ -29,6 +29,8 @@ session driven by Playwright (`e2e/smoke.mjs`) against an S3-compatible server:
 | Dark + light theme, responsive desktop/mobile, drag & drop, confirmations, toasts, empty/loading states | ✅ tested |
 | Token gate (`GAMEVAULT_AUTH_TOKEN`) + setup mode without credentials | ✅ tested |
 | Password login (`GAMEVAULT_PASSWORD_HASH`) with HttpOnly session + idle auto-lock | ✅ tested |
+| Nested folders (game → sub-folder → sub-folder) with big folder icons | ✅ tested |
+| Auto-versioned ZIP builds: `<folder> v1, v2, v3` in Game/App collections | ✅ tested |
 | **Uploads to the real Filebase service** | ⚠️ **not tested here** — no Filebase credentials exist in this workspace. Everything is exercised against a local S3-compatible server instead; point `FILEBASE_ENDPOINT` at `https://s3.filebase.io` and add real keys to try it. |
 
 If a format has no browser loader, the UI says so and offers a download. Nothing is faked.
@@ -188,6 +190,11 @@ No variable is prefixed with `VITE_`, so nothing is inlined into the frontend bu
 
 **What you must do before exposing it publicly**
 
+* Group assets per project with **Folders** (Folders tab): City Builder → Commercial Building → Roads.
+  Folders nest to any depth and can be created from the phone UI.
+* Drop a ZIP into a folder while the collection is **Game** or **App** and it is named
+  `<folder> v1`, `v2`, `v3`… automatically. Other collections keep the original filename.
+  The bucket key never changes; only the display/download name is versioned.
 * Set `GAMEVAULT_AUTH_TOKEN` (`openssl rand -hex 32`). Without it, **anyone who can reach the API
   can list, download and delete your assets.** A private bucket does *not* make an unauthenticated
   API private — the API is the only thing that can mint download URLs.

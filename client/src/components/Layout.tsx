@@ -9,8 +9,9 @@ import { Spinner } from './ui';
 
 const NAV: Array<{ to: string; label: string; icon: IconName; end?: boolean }> = [
   { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
+  { to: '/folders', label: 'Folders', icon: 'folder' },
   { to: '/assets', label: 'All Assets', icon: 'library' },
-  { to: '/collections', label: 'Collections', icon: 'folder' },
+  { to: '/collections', label: 'Collections', icon: 'tag' },
   { to: '/uploads', label: 'Uploads', icon: 'upload' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ];

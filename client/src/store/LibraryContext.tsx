@@ -13,6 +13,7 @@ import type {
   Asset,
   Capabilities,
   Collection,
+  Folder,
   HealthResponse,
   SortKey,
   Stats,
@@ -21,6 +22,8 @@ import type {
 export interface Filters {
   q: string;
   collection: string;
+  /** Folder filter: '' = every asset, 'root' = not filed, else a folder id. */
+  folder: string;
   kind: string;
   tag: string;
   sort: SortKey;
@@ -31,6 +34,7 @@ export interface Filters {
 const DEFAULT_FILTERS: Filters = {
   q: '',
   collection: 'All',
+  folder: '',
   kind: 'all',
   tag: '',
   sort: 'newest',
@@ -74,6 +78,17 @@ interface LibraryContextValue {
 
   collections: Collection[];
   refreshCollections: () => Promise<void>;
+
+  folders: Folder[];
+  foldersLoading: boolean;
+  refreshFolders: () => Promise<void>;
+  createFolder: (name: string, parentId: string | null) => Promise<Folder>;
+  renameFolder: (id: string, name: string) => Promise<void>;
+  deleteFolder: (id: string, mode?: 'move' | 'delete') => Promise<void>;
+  moveAsset: (id: string, folderId: string | null) => Promise<void>;
+  /** Child folders of `parentId` (null = top level), name-sorted. */
+  childFolders: (parentId: string | null) => Folder[];
+  folderById: (id: string | null) => Folder | null;
   createCollection: (name: string, description?: string) => Promise<Collection>;
   deleteCollection: (id: string) => Promise<void>;
 
@@ -117,6 +132,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   });
 
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [foldersLoading, setFoldersLoading] = useState(true);
   const [needsToken, setNeedsToken] = useState(false);
   const [hasToken, setHasToken] = useState(Boolean(getToken()));
   const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(false);
@@ -177,6 +194,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       const data = await api.listAssets({
         q: filters.q || undefined,
         collection: filters.collection,
+        folder: filters.folder || undefined,
         kind: filters.kind,
         tag: filters.tag || undefined,
         sort: filters.sort,
@@ -225,6 +243,70 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshFolders = useCallback(async () => {
+    try {
+      setFoldersLoading(true);
+      const data = await api.listFolders();
+      setFolders(data.folders);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) setNeedsToken(true);
+    } finally {
+      setFoldersLoading(false);
+    }
+  }, []);
+
+  const createFolder = useCallback(
+    async (name: string, parentId: string | null) => {
+      const { folder } = await api.createFolder(name, parentId);
+      await refreshFolders();
+      return folder;
+    },
+    [refreshFolders],
+  );
+
+  const renameFolder = useCallback(
+    async (id: string, name: string) => {
+      await api.renameFolder(id, name);
+      await refreshFolders();
+    },
+    [refreshFolders],
+  );
+
+  const deleteFolder = useCallback(
+    async (id: string, mode: 'move' | 'delete' = 'move') => {
+      await api.deleteFolder(id, mode);
+      await Promise.all([refreshFolders(), refresh()]);
+    },
+    [refreshFolders, refresh],
+  );
+
+  const moveAsset = useCallback(
+    async (id: string, folderId: string | null) => {
+      try {
+        const { asset } = await api.patchAsset(id, { folderId });
+        setAssets((current) => current.map((a) => (a.id === id ? asset : a)));
+        void refreshFolders();
+        void refreshStats();
+      } catch (err) {
+        throw err;
+      }
+    },
+    [refreshFolders, refreshStats],
+  );
+
+  const childFolders = useCallback(
+    (parentId: string | null) =>
+      folders
+        .filter((folder) => (folder.parentId ?? null) === (parentId ?? null))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [folders],
+  );
+
+  const folderById = useCallback(
+    (id: string | null) => (id ? (folders.find((folder) => folder.id === id) ?? null) : null),
+    [folders],
+  );
+
   /** Read the (public) session state so the right gate is shown on first paint. */
   const refreshSession = useCallback(async () => {
     try {
@@ -258,6 +340,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!needsToken) void refreshCollections();
   }, [refreshCollections, needsToken]);
+
+  useEffect(() => {
+    if (!needsToken) void refreshFolders();
+  }, [refreshFolders, needsToken]);
 
   const setFilters = useCallback((patch: Partial<Filters>) => {
     setFiltersState((current) => {
@@ -342,9 +428,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       setSessionExpiresAt(info.expiresAt);
       setRequiresLogin(false);
       setNeedsToken(false);
-      await Promise.all([refresh(), refreshCollections(), checkHealth()]);
+      await Promise.all([refresh(), refreshCollections(), refreshFolders(), checkHealth()]);
     },
-    [refresh, refreshCollections, checkHealth],
+    [refresh, refreshCollections, refreshFolders, checkHealth],
   );
 
   const logout = useCallback(async () => {
@@ -359,6 +445,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setAssets([]);
     setTotal(0);
     setStats(null);
+    setFolders([]);
     setRequiresLogin(passwordLoginEnabled);
     setNeedsToken(passwordLoginEnabled ? false : Boolean(capabilities?.authRequired));
   }, [passwordLoginEnabled, capabilities?.authRequired]);
@@ -434,6 +521,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const hasActiveFilters =
     Boolean(filters.q) ||
     filters.collection !== 'All' ||
+    Boolean(filters.folder) ||
     filters.kind !== 'all' ||
     Boolean(filters.tag) ||
     filters.sort !== 'newest';
@@ -469,6 +557,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       refreshCollections,
       createCollection,
       deleteCollection,
+      folders,
+      foldersLoading,
+      refreshFolders,
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      moveAsset,
+      childFolders,
+      folderById,
       needsToken,
       setAccessToken,
       hasToken,
@@ -509,6 +606,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       refreshCollections,
       createCollection,
       deleteCollection,
+      folders,
+      foldersLoading,
+      refreshFolders,
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      moveAsset,
+      childFolders,
+      folderById,
       needsToken,
       setAccessToken,
       hasToken,

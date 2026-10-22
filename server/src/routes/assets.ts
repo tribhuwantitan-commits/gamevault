@@ -23,6 +23,13 @@ import {
   presignUploadParts,
 } from '../lib/s3.js';
 import { contentDisposition, newId, nowIso, parseETag } from '../lib/util.js';
+import {
+  descendantFolderIds,
+  folderPath,
+  isBundleFile,
+  collectionIsVersioned,
+  versionTitle,
+} from '../lib/folders.js';
 import { AppError, type AssetRecord, type PendingUpload } from '../types.js';
 import { toAssetDTO } from './serialize.js';
 
@@ -34,6 +41,10 @@ const uploadRequestSchema = z.object({
   filename: z.string().min(1, 'A filename is required').max(255),
   size: z.number().int().positive('File size must be greater than zero'),
   collection: z.string().max(60).optional(),
+  /** Folder to file the upload into; omit for "not filed". */
+  folderId: z.string().uuid().nullish(),
+  /** Let the server name ZIP bundles "<folder> v1, v2, v3" (Game/App only). */
+  autoVersion: z.boolean().optional(),
   tags: z.array(z.string()).max(50).optional(),
   description: z.string().max(2000).optional(),
 });
@@ -43,6 +54,9 @@ const idSchema = z.string().uuid('Invalid asset id');
 const listQuerySchema = z.object({
   q: z.string().max(200).optional(),
   collection: z.string().max(60).optional(),
+  /** Folder id, or "root" for assets that are not filed in any folder. */
+  folder: z.string().max(64).optional(),
+  includeDescendants: z.enum(['0', '1']).optional(),
   kind: z.string().max(20).optional(),
   tag: z.string().max(40).optional(),
   sort: z.enum(['newest', 'oldest', 'name', 'name-desc', 'size-desc', 'size-asc']).optional(),
@@ -55,6 +69,7 @@ const patchSchema = z
     title: z.string().max(160).optional(),
     tags: z.array(z.string()).max(50).optional(),
     collection: z.string().max(60).optional(),
+    folderId: z.string().uuid().nullish(),
     description: z.string().max(2000).optional(),
   })
   .strict();
@@ -78,6 +93,20 @@ const multipartAbortSchema = z.object({
   assetId: idSchema,
   uploadId: z.string().min(1).max(1024),
 });
+
+/**
+ * Name a download uses: the display title plus the original extension, so an
+ * auto-versioned bundle saves as "City Builder v3.zip" while the object key in
+ * the bucket never changes.
+ */
+function downloadName(asset: AssetRecord): string {
+  const title = asset.title?.trim();
+  if (!title) return asset.originalFilename || asset.filename;
+  const extension = asset.extension || asset.filename.split('.').pop() || '';
+  return extension && !title.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+    ? `${title}.${extension}`
+    : title;
+}
 
 function pendingIsStale(pending: PendingUpload): boolean {
   return Date.now() - new Date(pending.createdAt).getTime() > PENDING_TTL_MS;
@@ -104,7 +133,7 @@ async function pendingOrThrow(assetId: string): Promise<PendingUpload> {
 
 async function createAssetFromObject(
   pending: PendingUpload,
-  info: { size: number; etag?: string },
+  info: { size: number; etag?: string; autoVersion?: boolean },
 ): Promise<AssetRecord> {
   const now = nowIso();
   const type = requireFileType(pending.filename);
@@ -119,13 +148,16 @@ async function createAssetFromObject(
     kind: type.kind,
     extension: type.extension,
     collection: pending.collection || FALLBACK_COLLECTION,
+    folderId: pending.folderId ?? null,
     tags: pending.tags,
     description: pending.description,
     uploadedAt: now,
     updatedAt: now,
     etag: info.etag,
   };
-  return store.commitAsset(asset);
+  // Version titles are assigned inside the store's write lock, so two uploads
+  // finishing at the same moment cannot both become v3.
+  return store.commitAsset(asset, { autoVersion: info.autoVersion === true });
 }
 
 /** GET /api/assets — paginated, filtered, sorted listing. */
@@ -138,6 +170,19 @@ assetsRouter.get('/', async (req, res, next) => {
     if (query.collection && query.collection !== 'All') {
       const target = query.collection.toLowerCase();
       items = items.filter((a) => a.collection.toLowerCase() === target);
+    }
+    if (query.folder) {
+      if (query.folder === 'root') {
+        items = items.filter((a) => !a.folderId);
+      } else {
+        const folders = await store.listFolders();
+        const ids =
+          query.includeDescendants === '1'
+            ? [...descendantFolderIds(folders, query.folder)]
+            : [query.folder];
+        const wanted = new Set(ids);
+        items = items.filter((a) => wanted.has(a.folderId ?? ''));
+      }
     }
     if (query.kind && query.kind !== 'all') {
       items = items.filter((a) => a.kind === query.kind);
@@ -278,6 +323,39 @@ assetsRouter.post('/upload-url', async (req, res, next) => {
       collections.find((c) => c.toLowerCase() === (body.collection ?? '').trim().toLowerCase()) ??
       FALLBACK_COLLECTION;
 
+    // --- folders + automatic versioning ---
+    const folderId = body.folderId ?? null;
+    let folder = null;
+    if (folderId) {
+      folder = await store.getFolder(folderId);
+      if (!folder) throw new AppError(404, 'folder_not_found', 'That folder no longer exists.');
+    }
+
+    // Only bundle files (ZIP and friends) get <folder> v1, v2, v3 in Game/App.
+    const autoVersion =
+      body.autoVersion !== false &&
+      Boolean(folder) &&
+      collectionIsVersioned(collection) &&
+      isBundleFile(safeName);
+
+    const folderAssets = folderId
+      ? (await store.listAssets()).filter((asset) => (asset.folderId ?? null) === folderId)
+      : [];
+    const versionPreview =
+      autoVersion && folder
+        ? versionTitle(
+            folder.name,
+            Math.max(
+              0,
+              ...folderAssets.map((asset) => {
+                const match = /v(\d+)$/i.exec(asset.title?.trim() ?? '');
+                return match ? Number(match[1]) : 0;
+              }),
+              folderAssets.length,
+            ) + 1,
+          )
+        : null;
+
     const pendingBase: PendingUpload = {
       id,
       key,
@@ -286,6 +364,8 @@ assetsRouter.post('/upload-url', async (req, res, next) => {
       size: body.size,
       contentType: type.contentType,
       collection,
+      folderId,
+      autoVersion,
       tags: normalizeTags(body.tags, config.limits),
       description: (body.description ?? '').slice(0, 2000),
       mode: 'single',
@@ -322,6 +402,8 @@ assetsRouter.post('/upload-url', async (req, res, next) => {
 
       res.status(201).json({
         mode: 'multipart',
+        folderId,
+        versionPreview,
         assetId: id,
         key,
         uploadId,
@@ -430,7 +512,11 @@ assetsRouter.post('/multipart/complete', async (req, res, next) => {
       );
     }
 
-    const asset = await createAssetFromObject(pending, { size: head.size, etag: head.etag });
+    const asset = await createAssetFromObject(pending, {
+      size: head.size,
+      etag: head.etag,
+      autoVersion: pending.autoVersion,
+    });
     res.status(201).json({ asset: toAssetDTO(asset) });
   } catch (err) {
     next(err);
@@ -487,7 +573,11 @@ assetsRouter.post('/confirm-upload', async (req, res, next) => {
       );
     }
 
-    const asset = await createAssetFromObject(pending, { size: head.size, etag: head.etag });
+    const asset = await createAssetFromObject(pending, {
+      size: head.size,
+      etag: head.etag,
+      autoVersion: pending.autoVersion,
+    });
     res.status(201).json({ asset: toAssetDTO(asset) });
   } catch (err) {
     next(err);
@@ -534,7 +624,7 @@ assetsRouter.get('/:id/download', async (req, res, next) => {
     const asset = await store.getAsset(id);
     if (!asset) throw new AppError(404, 'asset_not_found', 'That asset is not in the library.');
 
-    const filename = asset.originalFilename || asset.filename;
+    const filename = downloadName(asset);
     const url = await presignGet(asset.key, config.presign.downloadExpiresSeconds, {
       filename,
       disposition: 'attachment',
@@ -570,6 +660,17 @@ assetsRouter.patch('/:id', async (req, res, next) => {
     if (body.title !== undefined) patch.title = body.title.trim().slice(0, 160);
     if (body.description !== undefined) patch.description = body.description.slice(0, 2000);
     if (body.tags !== undefined) patch.tags = normalizeTags(body.tags, config.limits);
+    if (body.folderId !== undefined) {
+      if (body.folderId === null) {
+        patch.folderId = null;
+      } else {
+        const folder = await store.getFolder(body.folderId);
+        if (!folder) {
+          throw new AppError(404, 'folder_not_found', 'That folder no longer exists.');
+        }
+        patch.folderId = folder.id;
+      }
+    }
     if (body.collection !== undefined) {
       const trimmed = body.collection.trim();
       if (!trimmed) throw new AppError(400, 'invalid_collection', 'A collection name is required.');

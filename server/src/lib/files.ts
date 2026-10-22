@@ -81,17 +81,15 @@ const BY_EXTENSION = new Map<string, FileTypeInfo>(REGISTRY.map((r) => [r.extens
 
 export const SUPPORTED_EXTENSIONS = REGISTRY.map((r) => r.extension);
 
-export const DEFAULT_COLLECTIONS = [
-  'Buildings',
-  'Characters',
-  'Vehicles',
-  'Environments',
-  'UI',
-  'Textures',
-  'Audio',
-  'Animations',
-  'Other',
-] as const;
+/**
+ * Collections are content *types*. The project/game grouping lives in folders
+ * (see FolderRecord), so a City Builder folder can hold 2D, 3D, audio and ZIPs
+ * while still being tagged with one of these types.
+ */
+export const DEFAULT_COLLECTIONS = ['Game', 'App', '2D', '3D', 'Audio', 'Environment', 'Other'] as const;
+
+/** Collections whose ZIP bundles get automatic <folder> v1, v2, v3 names. */
+export const VERSIONED_COLLECTIONS = ['Game', 'App'] as const;
 
 export const FALLBACK_COLLECTION = 'Other';
 

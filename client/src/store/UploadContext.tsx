@@ -32,6 +32,7 @@ export interface UploadTask {
   speedBps: number;
   error?: string;
   collection: string;
+  folderId: string | null;
   tags: string[];
   description: string;
   queuedAt: number;
@@ -72,7 +73,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   const [tasks, setTasks] = useState<UploadTask[]>([]);
   const [configuration, setConfiguration] = useState<UploadOptions>({
-    collection: 'Other',
+    collection: 'Game',
+    folderId: null,
+    autoVersion: true,
     tags: [],
     description: '',
   });
@@ -194,6 +197,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           progress: 0,
           speedBps: 0,
           collection: options.collection,
+          folderId: options.folderId ?? null,
           tags: options.tags,
           description: options.description,
           queuedAt: Date.now(),
@@ -260,7 +264,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       queueRef.current.push({
         taskId: id,
         file,
-        options: { collection: task.collection, tags: task.tags, description: task.description },
+        options: {
+          collection: task.collection,
+          folderId: task.folderId ?? null,
+          autoVersion: true,
+          tags: task.tags,
+          description: task.description,
+        },
         controller: new AbortController(),
       });
       schedule();
@@ -280,11 +290,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (configuration.collection === 'Other' && collections.length > 0) {
-      // Keep the default selection valid if "Other" was renamed away.
-      if (!collections.some((c) => c.name === configuration.collection)) {
-        setConfiguration((c) => ({ ...c, collection: collections[0]!.name }));
-      }
+    if (collections.length > 0 && !collections.some((c) => c.name === configuration.collection)) {
+      // Keep the selection valid if the collection list changed.
+      setConfiguration((c) => ({ ...c, collection: collections[0]!.name }));
     }
   }, [collections, configuration.collection]);
 

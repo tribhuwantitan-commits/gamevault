@@ -142,7 +142,11 @@ test('capabilities advertises formats, limits and preview support', async () => 
   assert.ok(caps.body.previewSupport.native.includes('png'));
   assert.ok(caps.body.previewSupport.threeD.includes('fbx'));
   assert.ok(caps.body.previewSupport.downloadOnly.includes('blend'));
-  assert.ok(caps.body.defaultCollections.includes('Buildings'));
+  assert.ok(caps.body.defaultCollections.includes('Game'));
+  assert.deepEqual(
+    [...caps.body.defaultCollections].sort(),
+    ['2D', '3D', 'App', 'Audio', 'Environment', 'Game', 'Other'],
+  );
 });
 
 test('upload-url rejects unsupported formats, oversized files and sanitises names', async () => {
@@ -179,13 +183,13 @@ test('upload-url rejects unsupported formats, oversized files and sanitises name
 test('single-file upload round-trip: verify, list, download, patch, delete', async () => {
   const bytes = makeBytes(4096, 7);
   const { assetId, asset } = await uploadAsset(api.baseUrl, 'crate_albedo.png', bytes, {
-    collection: 'Textures',
+    collection: '2D',
     tags: ['wood', 'crate'],
   });
 
   assert.equal(asset.id, assetId);
   assert.equal(asset.size, bytes.length);
-  assert.equal(asset.collection, 'Textures');
+  assert.equal(asset.collection, '2D');
   assert.deepEqual(asset.tags, ['wood', 'crate']);
   assert.equal(asset.extension, 'png');
   assert.equal(asset.kind, 'image');
@@ -217,12 +221,12 @@ test('single-file upload round-trip: verify, list, download, patch, delete', asy
   const patched = await json(`${api.baseUrl}/api/assets/${assetId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: 'Wooden crate', tags: ['wood', 'crate', 'lowpoly'], collection: 'Buildings' }),
+    body: JSON.stringify({ title: 'Wooden crate', tags: ['wood', 'crate', 'lowpoly'], collection: '3D' }),
   });
   assert.equal(patched.status, 200);
   assert.equal(patched.body.asset.title, 'Wooden crate');
   assert.equal(patched.body.asset.displayName, 'Wooden crate');
-  assert.equal(patched.body.asset.collection, 'Buildings');
+  assert.equal(patched.body.asset.collection, '3D');
   assert.deepEqual(patched.body.asset.tags, ['wood', 'crate', 'lowpoly']);
 
   const badCollection = await json(`${api.baseUrl}/api/assets/${assetId}`, {
@@ -272,7 +276,7 @@ test('multipart upload works for files above the threshold', async () => {
   const ticket = await post(`${api.baseUrl}/api/assets/upload-url`, {
     filename: 'city_block.fbx',
     size: bytes.length,
-    collection: 'Environments',
+    collection: 'Environment',
     tags: ['modular'],
   });
   assert.equal(ticket.status, 201, JSON.stringify(ticket.body));
@@ -324,8 +328,8 @@ test('multipart upload works for files above the threshold', async () => {
 test('search, filters, sorting and pagination', async () => {
   const created: string[] = [];
   for (const [name, collection, tags] of [
-    ['brick_wall.png', 'Textures', ['wall']],
-    ['hero_knight.glb', 'Characters', ['rigged']],
+    ['brick_wall.png', '2D', ['wall']],
+    ['hero_knight.glb', '3D', ['rigged']],
     ['engine_loop.wav', 'Audio', ['loop']],
   ] as const) {
     const { assetId } = await uploadAsset(api.baseUrl, name, makeBytes(2048, name.length), {
@@ -363,7 +367,7 @@ test('search, filters, sorting and pagination', async () => {
   // Stats are computed from the whole library, not the filtered page.
   const stats = await json(`${api.baseUrl}/api/assets/stats`);
   assert.equal(stats.body.totalAssets, 3);
-  assert.equal(stats.body.byCollection.Characters.count, 1);
+  assert.equal(stats.body.byCollection['3D'].count, 1);
 
   for (const id of created) {
     await json(`${api.baseUrl}/api/assets/${id}`, { method: 'DELETE' });
@@ -428,7 +432,7 @@ test('collections can be created, listed and deleted only when empty', async () 
   assert.equal(ok.status, 200);
 
   const defaults = await json(`${api.baseUrl}/api/collections`);
-  const textures = defaults.body.collections.find((c: any) => c.name === 'Textures');
+  const textures = defaults.body.collections.find((c: any) => c.name === '2D');
   const protectedDelete = await json(`${api.baseUrl}/api/collections/${textures.id}`, { method: 'DELETE' });
   assert.equal(protectedDelete.status, 400);
   assert.equal(protectedDelete.body.error.code, 'protected_collection');
