@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { LoginScreen } from './components/LoginScreen';
 import { TokenGate } from './components/TokenGate';
 import { ToastViewport } from './components/ToastViewport';
 import { useLibrary } from './store/LibraryContext';
@@ -11,7 +13,9 @@ import { UploadsPage } from './pages/UploadsPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
-  const { needsToken, capsLoading } = useLibrary();
+  const { needsToken, requiresLogin, capsLoading, setAccessToken, hasToken } = useLibrary();
+  // Lets the user fall back to an API token from the password screen.
+  const [tokenFallback, setTokenFallback] = useState(false);
 
   if (capsLoading) {
     return (
@@ -24,7 +28,22 @@ export function App() {
     );
   }
 
-  if (needsToken) {
+  // Password login takes precedence; the token screen stays available as a fallback.
+  if (requiresLogin && !tokenFallback) {
+    return (
+      <>
+        <LoginScreen
+          onUseToken={() => {
+            setTokenFallback(true);
+            setAccessToken('');
+          }}
+        />
+        <ToastViewport />
+      </>
+    );
+  }
+
+  if (needsToken || (requiresLogin && tokenFallback && !hasToken)) {
     return (
       <>
         <TokenGate />

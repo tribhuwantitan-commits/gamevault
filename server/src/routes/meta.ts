@@ -19,7 +19,9 @@ metaRouter.get('/health', async (req, res) => {
     version: '1.0.0',
     uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
     time: new Date().toISOString(),
-    authRequired: Boolean(config.authToken),
+    // True when the API is closed to anonymous callers — either secret counts.
+    authRequired: Boolean(config.authToken) || Boolean(config.passwordHash),
+    passwordLoginEnabled: Boolean(config.passwordHash),
     storage: {
       configured: config.storage.configured,
       endpoint: config.storage.endpoint,
@@ -66,7 +68,11 @@ metaRouter.get('/capabilities', async (_req, res, next) => {
       appName: 'GameVault',
       version: '1.0.0',
       storageConfigured: config.storage.configured,
-      authRequired: Boolean(config.authToken),
+      // True when the API is closed to anonymous callers — either secret counts.
+    authRequired: Boolean(config.authToken) || Boolean(config.passwordHash),
+      /** Password login available? Only a boolean — the hash never leaves the server. */
+      passwordLoginEnabled: Boolean(config.passwordHash),
+      sessionTtlSeconds: config.session.ttlSeconds,
       setupInstructions: config.storage.configured
         ? null
         : [

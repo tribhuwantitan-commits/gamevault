@@ -28,6 +28,7 @@ session driven by Playwright (`e2e/smoke.mjs`) against an S3-compatible server:
 | Image / audio / video previews, **glTF/GLB/OBJ/STL/FBX 3D preview**, download-only fallback for BLEND/ZIP/etc. | ✅ tested in Chromium |
 | Dark + light theme, responsive desktop/mobile, drag & drop, confirmations, toasts, empty/loading states | ✅ tested |
 | Token gate (`GAMEVAULT_AUTH_TOKEN`) + setup mode without credentials | ✅ tested |
+| Password login (`GAMEVAULT_PASSWORD_HASH`) with HttpOnly session + idle auto-lock | ✅ tested |
 | **Uploads to the real Filebase service** | ⚠️ **not tested here** — no Filebase credentials exist in this workspace. Everything is exercised against a local S3-compatible server instead; point `FILEBASE_ENDPOINT` at `https://s3.filebase.io` and add real keys to try it. |
 
 If a format has no browser loader, the UI says so and offers a download. Nothing is faked.
@@ -149,6 +150,8 @@ See `server/.env.example` for the annotated list.
 | `FILEBASE_REGION` | `us-east-1` | signing region |
 | `PORT` / `HOST` | `3001` / `0.0.0.0` | API listener |
 | `GAMEVAULT_AUTH_TOKEN` | empty | shared secret required on every non-public API call |
+| `GAMEVAULT_PASSWORD_HASH` | empty | optional login password (PBKDF2 hash) for the browser UI — see `DEPLOYMENT.md` §7.8 |
+| `GAMEVAULT_SESSION_TTL_HOURS` | `24` | idle session lifetime before the password is required again |
 | `GAMEVAULT_ALLOWED_ORIGINS` | `http://localhost:5173,…` | extra browser origins allowed to call the API |
 | `MAX_UPLOAD_BYTES` | `2147483648` (2 GiB) | per-file ceiling |
 | `MULTIPART_THRESHOLD_BYTES` | `33554432` (32 MiB) | files at/above this use multipart |
@@ -190,6 +193,11 @@ No variable is prefixed with `VITE_`, so nothing is inlined into the frontend bu
   API private — the API is the only thing that can mint download URLs.
 * Serve over HTTPS (the token is a bearer credential).
 * Set `GAMEVAULT_ALLOWED_ORIGINS` to your real frontend origin(s) if they differ from the API's.
+* Prefer typing a short password on your phone? Generate a hash with
+  `tools/password-hash.html` (works offline) or `npm run hash-password`, and set
+  `GAMEVAULT_PASSWORD_HASH`. The long token keeps working for scripts; the browser gets a
+  24-hour, HttpOnly session cookie instead. Neither the token nor the hash ever reaches the
+  browser.
 * The token gate is a single shared secret, appropriate for a personal library. For multiple
   users, replace `server/src/middleware/auth.ts` with real sessions/OIDC — the rest of the app
   does not need to change.

@@ -6,6 +6,7 @@ import { requireAuth, PUBLIC_PATHS } from './middleware/auth.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { assetsRouter } from './routes/assets.js';
+import { authRouter } from './routes/auth.js';
 import { collectionsRouter } from './routes/collections.js';
 import { metaRouter } from './routes/meta.js';
 
@@ -56,6 +57,8 @@ export function createApp(): Express {
   const api = express.Router();
   api.use('/health', rateLimit({ windowMs: 60_000, max: 120, name: 'health' }));
   api.use(rateLimit({ windowMs: 60_000, max: 600, name: 'api' }));
+  // Login/session endpoints must be reachable before authenticating.
+  api.use('/auth', authRouter);
   api.use((req, res, next) => {
     // /health and /capabilities stay open so the UI can boot in a setup state.
     if (PUBLIC_PATHS.has(req.path)) return next();
